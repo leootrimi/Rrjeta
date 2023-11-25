@@ -1,8 +1,10 @@
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
 
 
 public class Server {
@@ -26,10 +28,24 @@ public class Server {
 class ServerWork extends Thread {
 
     private Socket clientSocket;
+    private ArrayList<Socket> readOnlyUsers = new ArrayList<>();
+    private ArrayList<Socket> readWriteUsers = new ArrayList<>();
+    private boolean isFirstClient = true;
 
     public ServerWork(Socket clientSocket) {
         this.clientSocket = clientSocket;
         System.out.println("Client connected...");
+        if (isFirstClient) {
+            readWriteUsers.add(clientSocket);
+            isFirstClient = false;
+        } else {
+            readOnlyUsers.add(clientSocket);
+        }
+
+        for (Socket users : readWriteUsers){
+            System.out.println(users);
+        }
+
     }
 
     @Override
@@ -66,8 +82,17 @@ class ServerWork extends Thread {
                         }
 
                         String messageFromTheClient = clientInput.readLine();
-                        if(messageFromTheClient != null) {
-                            System.out.println("Message from the client: " + messageFromTheClient);
+                        if (messageFromTheClient != null) {
+                            if (isInReadOnlyUsers(clientSocket)) {
+                                System.out.println("Read-only user sent a message: " + messageFromTheClient);
+                            }
+                            if (isInReadAndWriteUsers(clientSocket)) {
+                                System.out.println("Message from client Read N Write: " + messageFromTheClient);
+                            }
+                            if (messageFromTheClient.equals("exit")) {
+                                clientSocket.close();
+                                break;
+                            }
                         }
 
                         if(messageFromTheClient.equals("exit")) {
@@ -83,7 +108,6 @@ class ServerWork extends Thread {
             }
         });
 
-        // Starting the message printer on a new Thread
         messagePrinter.start();
 
         while(true) {
@@ -102,6 +126,24 @@ class ServerWork extends Thread {
 
         clientSocket.close();
 
+    }
+
+    private boolean isInReadOnlyUsers(Socket clientSocket) {
+        for (Socket socket : readOnlyUsers) {
+            if (socket.getPort() == clientSocket.getPort()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isInReadAndWriteUsers(Socket clientSocket) {
+        for (Socket socket : readWriteUsers) {
+            if (socket.getPort() == clientSocket.getPort()) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

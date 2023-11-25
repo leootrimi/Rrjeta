@@ -40,7 +40,6 @@ public class Client {
         messagePrinter.start();
 
         while(true) {
-
             // Reading message from the keyboard
             System.out.println("Enter message to be send : ");
             String line = keyboardInput.readLine();
