@@ -1,26 +1,39 @@
-
 import java.io.*;
-import java.lang.reflect.Array;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Scanner;
 
 public class Server {
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    private static final int PORT = 3000;
+    private static final InetAddress ADDRESS = InetAddress.getLoopbackAddress();
+    static final Map<String, String> userCredentials = new HashMap<>();
 
-        InetAddress address = InetAddress.getByName("localhost");
-        ServerSocket server = new ServerSocket(3000,3, address);
-        System.out.println("Server Started at port : " + address);
-        while(true) {
+    static {
+        userCredentials.put("Leotrim", "passw");
+    }
 
-            Socket newClient = server.accept();
+    public static void main(String[] args) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(PORT, 3, ADDRESS);
+        System.out.println("Server Started at port : " + ADDRESS + ":" + PORT);
 
-            ServerWork serverWorker = new ServerWork(newClient);
-            serverWorker.start();
+        Scanner input = new Scanner(System.in);
+        System.out.println("Enter the name of the file to store client information: ");
+        String filePath = input.next();
+        System.out.println("File: " + filePath + " will be created");
 
+        try (FileOutputStream fos = new FileOutputStream(filePath)) {
+            while (true) {
+                Socket newClient = serverSocket.accept();
+                ServerWork serverWorker = new ServerWork(newClient, fos);
+                serverWorker.start();
+            }
         }
     }
 }
@@ -28,24 +41,21 @@ public class Server {
 class ServerWork extends Thread {
 
     private Socket clientSocket;
-    private ArrayList<Socket> readOnlyUsers = new ArrayList<>();
-    private ArrayList<Socket> readWriteUsers = new ArrayList<>();
-    private boolean isFirstClient = true;
-
-    public ServerWork(Socket clientSocket) {
+    private boolean isReadWriteOnly;
+    private FileOutputStream fos;
+    private FileInputStream fis;
+    public ServerWork(Socket clientSocket, FileOutputStream fos) {
         this.clientSocket = clientSocket;
+        this.fos = fos;
         System.out.println("Client connected...");
-        if (isFirstClient) {
-            readWriteUsers.add(clientSocket);
-            isFirstClient = false;
+
+
+        if (authenticateClient()) {
+            isReadWriteOnly = !isFirstClient();
+            System.out.println("User authenticated. Read-Write-only: " + isReadWriteOnly);
         } else {
-            readOnlyUsers.add(clientSocket);
+            System.out.println("Authentication failed.");
         }
-
-        for (Socket users : readWriteUsers){
-            System.out.println(users);
-        }
-
     }
 
     @Override
@@ -57,93 +67,102 @@ class ServerWork extends Thread {
         }
     }
 
-    void startWorker() throws IOException {
+    private boolean isFirstClient() {
+        // Implement logic to determine if this is the first client
+        return false;
+    }
 
 
-        // Getting the input/output streams of the client
+    private boolean authenticateClient() {
+        try {
+            BufferedReader clientInput = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            PrintWriter clientOutput = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+
+            // Ask for username
+            clientOutput.println("Enter your username:");
+            String username = clientInput.readLine();
+
+            // Ask for password
+            clientOutput.println("Enter your password:");
+            String password = clientInput.readLine();
+
+            // Check credentials
+            return Server.userCredentials.containsKey(username) && Server.userCredentials.get(username).equals(password);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private void startWorker() throws IOException {
         BufferedReader clientInput = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
         PrintWriter clientOutput = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
 
-        // Getting the keyboard input stream
-        BufferedReader keyboardInput = new BufferedReader(new InputStreamReader(System.in));
+        Thread messagePrinter = new Thread(() -> {
+            while (true) {
+                if (clientSocket.isClosed()) {
+                    Thread.interrupted();
+                    break;
+                }
+                try {
+                    String messageFromTheClient = clientInput.readLine();
+                    if (messageFromTheClient != null) {
+                        if (isReadWriteOnly) {
+                            System.out.println("Message from client Read N Write:" + messageFromTheClient);
+                            fos.write((messageFromTheClient + System.lineSeparator()).getBytes());
+                            fos.flush();
+                        } else {
 
-
-        Thread messagePrinter = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while(true) {
-                    if(clientSocket.isClosed()) {
-                        Thread.interrupted();
-                        break;
-                    }
-                    try {
-                        if(clientInput == null) {
-                            break;
                         }
-
-                        String messageFromTheClient = clientInput.readLine();
-                        if (messageFromTheClient != null) {
-                            if (isInReadOnlyUsers(clientSocket)) {
-                                System.out.println("Read-only user sent a message: " + messageFromTheClient);
-                            }
-                            if (isInReadAndWriteUsers(clientSocket)) {
-                                System.out.println("Message from client Read N Write: " + messageFromTheClient);
-                            }
-                            if (messageFromTheClient.equals("exit")) {
-                                clientSocket.close();
-                                break;
-                            }
-                        }
-
-                        if(messageFromTheClient.equals("exit")) {
+                        if (messageFromTheClient.equals("exit")) {
                             clientSocket.close();
                             break;
                         }
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
                     }
-
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
         });
 
         messagePrinter.start();
 
-        while(true) {
-            if(clientSocket.isClosed()) {
+        BufferedReader keyboardInput = new BufferedReader(new InputStreamReader(System.in));
+        while (true) {
+            if (clientSocket.isClosed()) {
                 break;
             }
             String messageBack = keyboardInput.readLine();
 
-            if(messageBack.equals("exit")) {
+            if (messageBack.equals("exit")) {
                 Thread.interrupted();
             }
             clientOutput.println(messageBack);
             clientOutput.flush();
-
         }
 
         clientSocket.close();
-
     }
 
-    private boolean isInReadOnlyUsers(Socket clientSocket) {
-        for (Socket socket : readOnlyUsers) {
-            if (socket.getPort() == clientSocket.getPort()) {
-                return true;
-            }
-        }
-        return false;
+    private boolean isValidCredentials(String username, String password) {
+        return Server.userCredentials.containsKey(username) &&
+                Server.userCredentials.get(username).equals(password);
     }
 
-    private boolean isInReadAndWriteUsers(Socket clientSocket) {
-        for (Socket socket : readWriteUsers) {
-            if (socket.getPort() == clientSocket.getPort()) {
-                return true;
+    private void sendFileDataToClient() {
+        try {
+            BufferedReader fileReader = new BufferedReader(new InputStreamReader(fis));
+            PrintWriter clientOutput = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
+
+            String line;
+            while ((line = fileReader.readLine()) != null) {
+                clientOutput.println(line);
+                clientOutput.flush();
             }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-        return false;
     }
 
 }
